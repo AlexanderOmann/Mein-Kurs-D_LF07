@@ -1,0 +1,9 @@
+auf basis der ampel
+ 
+code eingabe und vergleich
+ 
+wenn der key falsch ist einmal rot aufleuchten und gelb einschalten 
+ 
+bei 2 Fehlerhaften eingabe leuchtet nur noch rot ganze zeit
+ 
+ falls der key ok ist gruen aufleuchten 
