@@ -3,9 +3,9 @@ from time import sleep
 from getpass import getpass
 
 # GPIO-Pins der LEDs
-rot = LED(17)
-gelb = LED(27)
-gruen = LED(22)
+rot = LED(25)
+gelb = LED(24)
+gruen = LED(23)
 
 # Richtiger Zugangsschlüssel
 RICHTIGER_KEY = "1234"
