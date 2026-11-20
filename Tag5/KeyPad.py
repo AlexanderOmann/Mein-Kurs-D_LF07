@@ -1,72 +1,134 @@
 import sqlite3
 import RPi.GPIO as GPIO
-from time import sleep
+
+from datetime import datetime
 from pathlib import Path
+from time import sleep
 
 
-# -------------------------------------------------
-# Datenbank
-# -------------------------------------------------
+# =================================================
+# DATENBANK
+# =================================================
 
-# codes.db wird im gleichen Ordner wie KeyPad.py gesucht
+# Die Datei codes.db muss im gleichen Ordner
+# wie KeyPad.py liegen.
 DATENBANK_PFAD = Path(__file__).parent / "codes.db"
+
+
+def protokoll_erstellen():
+    """
+    Erstellt die Tabelle 'protokoll', falls sie
+    noch nicht vorhanden ist.
+    """
+
+    try:
+        with sqlite3.connect(DATENBANK_PFAD) as datenbank:
+            cursor = datenbank.cursor()
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS protokoll (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    zeitpunkt TEXT NOT NULL,
+                    benutzer TEXT,
+                    ergebnis TEXT NOT NULL
+                )
+            """)
+
+            datenbank.commit()
+
+    except sqlite3.Error as fehler:
+        print("Fehler beim Erstellen des Protokolls:", fehler)
 
 
 def code_pruefen(eingegebener_code):
     """
-    Überprüft, ob der eingegebene Code in der Datenbank vorhanden ist.
+    Prüft, ob der eingegebene Code in der
+    Tabelle 'zugang' vorhanden ist.
 
     Rückgabe:
-    - Name des Benutzers, wenn der Code gefunden wurde
-    - None, wenn der Code nicht gefunden wurde
+    - Benutzername bei richtigem Code
+    - None bei falschem Code
     """
 
     try:
-        datenbank = sqlite3.connect(DATENBANK_PFAD)
-        cursor = datenbank.cursor()
+        with sqlite3.connect(DATENBANK_PFAD) as datenbank:
+            cursor = datenbank.cursor()
 
-        cursor.execute(
-            "SELECT name FROM zugang WHERE code = ?",
-            (eingegebener_code,)
-        )
+            cursor.execute(
+                """
+                SELECT name
+                FROM zugang
+                WHERE code = ?
+                """,
+                (eingegebener_code,)
+            )
 
-        benutzer = cursor.fetchone()
+            benutzer = cursor.fetchone()
 
-        datenbank.close()
+            if benutzer is not None:
+                return benutzer[0]
 
-        if benutzer is not None:
-            return benutzer[0]
-
-        return None
+            return None
 
     except sqlite3.Error as fehler:
-        print("Datenbankfehler:", fehler)
+        print("Fehler bei der Codeprüfung:", fehler)
         return None
 
 
-# -------------------------------------------------
-# GPIO-Pins der LEDs
-# -------------------------------------------------
+def versuch_speichern(benutzer, ergebnis):
+    """
+    Speichert einen Anmeldeversuch in der
+    Tabelle 'protokoll'.
+    """
+
+    try:
+        zeitpunkt = datetime.now().strftime(
+            "%d.%m.%Y %H:%M:%S"
+        )
+
+        with sqlite3.connect(DATENBANK_PFAD) as datenbank:
+            cursor = datenbank.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO protokoll
+                (zeitpunkt, benutzer, ergebnis)
+                VALUES (?, ?, ?)
+                """,
+                (zeitpunkt, benutzer, ergebnis)
+            )
+
+            datenbank.commit()
+
+        print("Anmeldeversuch wurde protokolliert.")
+
+    except sqlite3.Error as fehler:
+        print("Fehler beim Speichern des Protokolls:", fehler)
+
+
+# =================================================
+# GPIO-PINS DER LEDs
+# =================================================
 
 ROT = 25
 GELB = 24
 GRUEN = 23
 
 
-# -------------------------------------------------
-# GPIO-Pins des 4x4-Keypads
-# -------------------------------------------------
+# =================================================
+# GPIO-PINS DES 4x4-KEYPADS
+# =================================================
 
-# Reihen des Keypads: R1, R2, R3, R4
+# Reihen R1 bis R4
 REIHEN = [5, 6, 13, 19]
 
-# Spalten des Keypads: C1, C2, C3, C4
+# Spalten C1 bis C4
 SPALTEN = [12, 16, 20, 21]
 
 
-# -------------------------------------------------
-# Tastenbelegung
-# -------------------------------------------------
+# =================================================
+# TASTENBELEGUNG
+# =================================================
 
 TASTEN = [
     ["1", "2", "3", "A"],
@@ -76,29 +138,24 @@ TASTEN = [
 ]
 
 
-# -------------------------------------------------
-# GPIO vorbereiten
-# -------------------------------------------------
+# =================================================
+# GPIO VORBEREITEN
+# =================================================
 
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 
-# LEDs als Ausgänge festlegen
+# LEDs als Ausgänge einrichten
 GPIO.setup(ROT, GPIO.OUT)
 GPIO.setup(GELB, GPIO.OUT)
 GPIO.setup(GRUEN, GPIO.OUT)
 
-# Alle LEDs am Anfang ausschalten
-GPIO.output(ROT, GPIO.LOW)
-GPIO.output(GELB, GPIO.LOW)
-GPIO.output(GRUEN, GPIO.LOW)
-
-# Keypad-Reihen als Ausgänge festlegen
+# Keypad-Reihen als Ausgänge einrichten
 for reihe in REIHEN:
     GPIO.setup(reihe, GPIO.OUT)
     GPIO.output(reihe, GPIO.HIGH)
 
-# Keypad-Spalten als Eingänge mit Pull-up-Widerstand festlegen
+# Keypad-Spalten als Eingänge einrichten
 for spalte in SPALTEN:
     GPIO.setup(
         spalte,
@@ -107,51 +164,13 @@ for spalte in SPALTEN:
     )
 
 
-# -------------------------------------------------
-# Keypad auslesen
-# -------------------------------------------------
-
-def taste_lesen():
-    """
-    Prüft alle Reihen und Spalten des Keypads.
-
-    Rückgabe:
-    - gedrückte Taste
-    - None, wenn keine Taste gedrückt wurde
-    """
-
-    for reihen_nummer, reihen_pin in enumerate(REIHEN):
-
-        # Aktuelle Reihe aktivieren
-        GPIO.output(reihen_pin, GPIO.LOW)
-
-        for spalten_nummer, spalten_pin in enumerate(SPALTEN):
-
-            # Prüfen, ob eine Taste gedrückt wurde
-            if GPIO.input(spalten_pin) == GPIO.LOW:
-
-                taste = TASTEN[reihen_nummer][spalten_nummer]
-
-                # Warten, bis die Taste losgelassen wurde
-                while GPIO.input(spalten_pin) == GPIO.LOW:
-                    sleep(0.05)
-
-                # Reihe wieder deaktivieren
-                GPIO.output(reihen_pin, GPIO.HIGH)
-
-                return taste
-
-        # Reihe wieder deaktivieren
-        GPIO.output(reihen_pin, GPIO.HIGH)
-
-    return None
-
-
-# -------------------------------------------------
-# LED-Funktionen
-# -------------------------------------------------
+# =================================================
+# LED-FUNKTIONEN
+# =================================================
 
 def alle_leds_aus():
+    """Schaltet alle drei LEDs aus."""
+
     GPIO.output(ROT, GPIO.LOW)
     GPIO.output(GELB, GPIO.LOW)
     GPIO.output(GRUEN, GPIO.LOW)
@@ -186,135 +205,22 @@ def erster_fehler():
 
 def zugang_gesperrt():
     """
-    Nach dem zweiten falschen Versuch
-    leuchtet Rot dauerhaft.
+    Rot leuchtet dauerhaft.
     """
 
     alle_leds_aus()
     GPIO.output(ROT, GPIO.HIGH)
 
 
-# -------------------------------------------------
-# Hauptprogramm
-# -------------------------------------------------
+# =================================================
+# KEYPAD AUSLESEN
+# =================================================
 
-eingabe = ""
-fehler = 0
-gesperrt = False
+def taste_lesen():
+    """
+    Prüft die vier Reihen und vier Spalten.
 
-print("----------------------------------")
-print("Codeschloss wurde gestartet")
-print("----------------------------------")
-print("Code über das Keypad eingeben.")
-print("# = Eingabe bestätigen")
-print("* = Eingabe löschen")
-print("----------------------------------")
-
-try:
-
-    while True:
-
-        # Wenn das System gesperrt ist,
-        # wird keine weitere Eingabe angenommen
-        if gesperrt:
-            sleep(1)
-            continue
-
-        taste = taste_lesen()
-
-        if taste is not None:
-
-            print("Gedrückte Taste:", taste)
-
-            # Eingabe mit * löschen
-            if taste == "*":
-
-                eingabe = ""
-                print("Eingabe wurde gelöscht.")
-
-            # Eingabe mit # bestätigen
-            elif taste == "#":
-
-                if eingabe == "":
-                    print("Es wurde noch kein Code eingegeben.")
-
-                else:
-                    print("Code wird überprüft ...")
-
-                    benutzername = code_pruefen(eingabe)
-
-                    # Richtiger Code
-                    if benutzername is not None:
-
-                        print("Code richtig!")
-                        print("Zugang erlaubt für:", benutzername)
-
-                        zugang_erlaubt()
-
-                        # Eingabe und Fehler zurücksetzen
-                        eingabe = ""
-                        fehler = 0
-
-                        print("Das Codeschloss ist wieder bereit.")
-
-                    # Falscher Code
-                    else:
-
-                        fehler = fehler + 1
-                        print("Code falsch!")
-
-                        # Erster falscher Versuch
-                        if fehler == 1:
-
-                            print("Noch ein Versuch möglich.")
-
-                            erster_fehler()
-                            eingabe = ""
-
-                        # Zweiter falscher Versuch
-                        elif fehler >= 2:
-
-                            print("Zugang dauerhaft gesperrt!")
-
-                            zugang_gesperrt()
-                            gesperrt = True
-                            eingabe = ""
-
-            # Zahlen in die Eingabe übernehmen
-            elif taste in "0123456789":
-
-                # Maximal acht Zeichen erlauben
-                if len(eingabe) < 8:
-
-                    eingabe = eingabe + taste
-
-                    # Im Terminal nur Sternchen anzeigen
-                    print("Aktuelle Eingabe:", "*" * len(eingabe))
-
-                else:
-                    print("Der eingegebene Code ist zu lang.")
-
-            # Tasten A, B, C und D werden nicht verwendet
-            else:
-                print(
-                    "Die Taste",
-                    taste,
-                    "hat momentan keine Funktion."
-                )
-
-        # Kleine Pause zur Entlastung des Raspberry Pi
-        sleep(0.05)
-
-
-except KeyboardInterrupt:
-
-    print("\nProgramm wurde mit Strg + C beendet.")
-
-
-finally:
-
-    # GPIO-Pins beim Beenden zurücksetzen
-    alle_leds_aus()
-    GPIO.cleanup()
-
-    print("GPIO-Pins wurden zurückgesetzt.")
+    Rückgabe:
+    - gedrückte Taste
+    - None, wenn keine Taste gedrückt wurde
+    """
