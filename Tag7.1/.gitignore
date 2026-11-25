@@ -1,0 +1,13 @@
+# Passwoerter und Umgebungsvariablen
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtuelle Python-Umgebungen
+venv/
+.venv/
+
+# VS Code
+.vscode/
